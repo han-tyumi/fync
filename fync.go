@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 var installDir, modsDir, backupDir string
@@ -123,34 +124,69 @@ func Sync(s Server, o *SyncOptions) error {
 	}
 
 	// download each mod to mods directory
+	ch := make(chan error, len(serverMods))
+	var mu sync.Mutex
 	for i := range serverMods {
-		mod := serverMods[i]
-		defer mod.Close()
+		go func(mod ServerFile) {
+			defer mod.Close()
 
-		info, err := mod.Stat()
-		if err != nil {
-			return err
-		}
-
-		name := info.Name()
-		dest := filepath.Join(modsDir, name)
-
-		// write server mod to local mods dir
-		if o.Force {
-			write(dest, mod, o)
-		} else {
-			size, exists := localMods[name]
-
-			if !exists {
-				write(dest, mod, o)
-			} else if size != info.Size() {
-				move(filepath.Join(modsDir, name), filepath.Join(backupDir, name), o)
-				write(dest, mod, o)
+			info, err := mod.Stat()
+			if err != nil {
+				ch <- err
+				return
 			}
-		}
 
-		if !o.KeepExisting {
-			delete(localMods, name)
+			name := info.Name()
+			dest := filepath.Join(modsDir, name)
+
+			// write server mod to local mods dir
+			if o.Force {
+				err := write(dest, mod, o)
+				if err != nil {
+					ch <- err
+					return
+				}
+			} else {
+				mu.Lock()
+				size, exists := localMods[name]
+				mu.Unlock()
+
+				if !exists {
+					err := write(dest, mod, o)
+					if err != nil {
+						ch <- err
+						return
+					}
+				} else if size != info.Size() {
+					err := move(filepath.Join(modsDir, name), filepath.Join(backupDir, name), o)
+					if err != nil {
+						ch <- err
+						return
+					}
+
+					err = write(dest, mod, o)
+					if err != nil {
+						ch <- err
+						return
+					}
+				}
+			}
+
+			if !o.KeepExisting {
+				mu.Lock()
+				delete(localMods, name)
+				mu.Unlock()
+			}
+
+			ch <- nil
+		}(serverMods[i])
+	}
+
+	for range serverMods {
+		err := <-ch
+		if err != nil {
+			close(ch)
+			return err
 		}
 	}
 
