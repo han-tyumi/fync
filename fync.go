@@ -182,6 +182,7 @@ func Sync(s Server, o *SyncOptions) error {
 		}(serverMods[i])
 	}
 
+	// TODO: refactor this error channel pattern into type
 	for range serverMods {
 		err := <-ch
 		if err != nil {
