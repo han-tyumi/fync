@@ -158,7 +158,7 @@ func Sync(s Server, o *SyncOptions) error {
 						return
 					}
 				} else if size != info.Size() {
-					err := move(filepath.Join(modsDir, name), filepath.Join(backupDir, name), o)
+					err := move(name, o)
 					if err != nil {
 						ch <- err
 						return
@@ -192,16 +192,31 @@ func Sync(s Server, o *SyncOptions) error {
 
 	if !o.KeepExisting && len(localMods) != 0 {
 		os.MkdirAll(backupDir, os.ModeDir|0755)
+
+		ch = make(chan error, len(localMods))
 		for mod := range localMods {
-			move(filepath.Join(modsDir, mod), filepath.Join(backupDir, mod), o)
+			mod := mod
+			go func() {
+				ch <- move(mod, o)
+			}()
+		}
+
+		for range localMods {
+			err := <-ch
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func move(from, to string, o *SyncOptions) error {
-	o.Printf("moving %q to %q ...\n", from, to)
+func move(name string, o *SyncOptions) error {
+	from := filepath.Join(modsDir, name)
+	to := filepath.Join(backupDir, name)
+
+	o.Printf("moving %q to %q ...\n", from, backupDir)
 	if err := os.Rename(from, to); err != nil {
 		return err
 	}
