@@ -120,6 +120,14 @@ func Sync(s Server, o *SyncOptions) error {
 		}
 	}
 
+	// define hooks
+	if o.OnWrite == nil {
+		o.OnWrite = func(_ *os.FileInfo, _ string) {}
+	}
+	if o.OnBackup == nil {
+		o.OnBackup = func(_, _, _ string) {}
+	}
+
 	// download each mod to mods directory
 	ch := make(chan error, len(serverMods))
 	var mu sync.Mutex
