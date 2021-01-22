@@ -53,7 +53,7 @@ func ModsDir() (string, error) {
 
 // BackupDir returns the backup directory for Minecraft mods that were not on the server.
 func BackupDir() (string, error) {
-	return modsDir, dirErr
+	return backupDir, dirErr
 }
 
 // ServerFile represents a server mod file that can be written to another file
