@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -73,8 +72,11 @@ type Server interface {
 
 // SyncOptions contains options for the Sync function.
 type SyncOptions struct {
-	// Used to log operations.
-	*log.Logger
+	// Called when a mod is being written.
+	OnWrite func(from *os.FileInfo, to string)
+
+	// Called when an existing mod is being backed up.
+	OnBackup func(name, from, to string)
 
 	// Whether or not to keep existing mods by not backing up them up if they're not on the server.
 	KeepExisting bool
@@ -118,11 +120,6 @@ func Sync(s Server, o *SyncOptions) error {
 		}
 	}
 
-	// define logger
-	if o.Logger == nil {
-		o.Logger = log.New(ioutil.Discard, "", 0)
-	}
-
 	// download each mod to mods directory
 	ch := make(chan error, len(serverMods))
 	var mu sync.Mutex
@@ -141,7 +138,7 @@ func Sync(s Server, o *SyncOptions) error {
 
 			// write server mod to local mods dir
 			if o.Force {
-				err := write(dest, mod, o)
+				err := write(mod, dest, o)
 				if err != nil {
 					ch <- err
 					return
@@ -152,19 +149,19 @@ func Sync(s Server, o *SyncOptions) error {
 				mu.Unlock()
 
 				if !exists {
-					err := write(dest, mod, o)
+					err := write(mod, dest, o)
 					if err != nil {
 						ch <- err
 						return
 					}
 				} else if size != info.Size() {
-					err := move(name, o)
+					err := backup(name, o)
 					if err != nil {
 						ch <- err
 						return
 					}
 
-					err = write(dest, mod, o)
+					err = write(mod, dest, o)
 					if err != nil {
 						ch <- err
 						return
@@ -198,7 +195,7 @@ func Sync(s Server, o *SyncOptions) error {
 		for mod := range localMods {
 			mod := mod
 			go func() {
-				ch <- move(mod, o)
+				ch <- backup(mod, o)
 			}()
 		}
 
@@ -213,21 +210,27 @@ func Sync(s Server, o *SyncOptions) error {
 	return nil
 }
 
-func move(name string, o *SyncOptions) error {
+func backup(name string, o *SyncOptions) error {
 	from := filepath.Join(modsDir, name)
 	to := filepath.Join(backupDir, name)
 
-	o.Printf("moving %q to %q ...\n", from, backupDir)
+	o.OnBackup(name, from, to)
+
 	if err := os.Rename(from, to); err != nil {
 		return err
 	}
 	return nil
 }
 
-func write(dest string, from ServerFile, o *SyncOptions) error {
-	o.Printf("writing %q ...\n", dest)
+func write(from ServerFile, to string, o *SyncOptions) error {
+	info, err := from.Stat()
+	if err != nil {
+		return err
+	}
 
-	file, err := os.Create(dest)
+	o.OnWrite(&info, to)
+
+	file, err := os.Create(to)
 	if err != nil {
 		return err
 	}
