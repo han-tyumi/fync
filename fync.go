@@ -78,6 +78,9 @@ type SyncOptions struct {
 	// Called when an existing mod is being backed up.
 	OnBackup func(name, from, to string)
 
+	// Called when a task's progress has updated.
+	OnProgress func(task string, curr, total int)
+
 	// Whether or not to keep existing mods by not backing up them up if they're not on the server.
 	KeepExisting bool
 
@@ -95,7 +98,10 @@ func Sync(s Server, o *SyncOptions) error {
 	serverMods, err := s.Mods()
 	if err != nil {
 		return err
-	} else if len(serverMods) == 0 {
+	}
+
+	total := len(serverMods)
+	if total == 0 {
 		return errors.New("no server mods to sync")
 	}
 
@@ -120,16 +126,13 @@ func Sync(s Server, o *SyncOptions) error {
 		}
 	}
 
-	// define hooks
-	if o.OnWrite == nil {
-		o.OnWrite = func(_ os.FileInfo, _ string) {}
-	}
-	if o.OnBackup == nil {
-		o.OnBackup = func(_, _, _ string) {}
+	curr := 0
+	if o.OnProgress != nil {
+		o.OnProgress("write", curr, total)
 	}
 
 	// download each mod to mods directory
-	ch := make(chan error, len(serverMods))
+	ch := make(chan error, total)
 	var mu sync.Mutex
 	for i := range serverMods {
 		go func(mod ServerFile) {
@@ -194,12 +197,23 @@ func Sync(s Server, o *SyncOptions) error {
 			close(ch)
 			return err
 		}
+
+		if o.OnProgress != nil {
+			curr++
+			o.OnProgress("write", curr, total)
+		}
 	}
 
-	if !o.KeepExisting && len(localMods) != 0 {
+	total = len(localMods)
+	if !o.KeepExisting && total != 0 {
 		os.MkdirAll(backupDir, os.ModeDir|0755)
 
-		ch = make(chan error, len(localMods))
+		if o.OnProgress != nil {
+			curr = 0
+			o.OnProgress("backup", curr, total)
+		}
+
+		ch = make(chan error, total)
 		for mod := range localMods {
 			mod := mod
 			go func() {
@@ -210,7 +224,13 @@ func Sync(s Server, o *SyncOptions) error {
 		for range localMods {
 			err := <-ch
 			if err != nil {
+				close(ch)
 				return err
+			}
+
+			if o.OnProgress != nil {
+				curr++
+				o.OnProgress("backup", curr, total)
 			}
 		}
 	}
@@ -222,7 +242,9 @@ func backup(name string, o *SyncOptions) error {
 	from := filepath.Join(modsDir, name)
 	to := filepath.Join(backupDir, name)
 
-	o.OnBackup(name, from, to)
+	if o.OnBackup != nil {
+		o.OnBackup(name, from, to)
+	}
 
 	if err := os.Rename(from, to); err != nil {
 		return err
@@ -231,12 +253,13 @@ func backup(name string, o *SyncOptions) error {
 }
 
 func write(from ServerFile, to string, o *SyncOptions) error {
-	info, err := from.Stat()
-	if err != nil {
-		return err
+	if o.OnWrite != nil {
+		info, err := from.Stat()
+		if err != nil {
+			return err
+		}
+		o.OnWrite(info, to)
 	}
-
-	o.OnWrite(info, to)
 
 	file, err := os.Create(to)
 	if err != nil {
