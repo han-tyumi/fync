@@ -89,25 +89,28 @@ type SyncOptions struct {
 }
 
 // Sync will sync the server's mods with the user's local Minecraft mods.
-func Sync(s Server, o *SyncOptions) error {
+// The number of mods written is returned as well as any errors encountered.
+func Sync(s Server, o *SyncOptions) (int, error) {
+	var n int
+
 	if dirErr != nil {
-		return dirErr
+		return n, dirErr
 	}
 
 	// obtain list of mods
 	serverMods, err := s.Mods()
 	if err != nil {
-		return err
+		return n, err
 	}
 
 	total := len(serverMods)
 	if total == 0 {
-		return errors.New("no server mods to sync")
+		return n, errors.New("no server mods to sync")
 	}
 
 	// make sure mods directory exists
 	if err := os.MkdirAll(modsDir, os.ModeDir|0755); err != nil {
-		return err
+		return n, err
 	}
 
 	// determine local mods
@@ -115,7 +118,7 @@ func Sync(s Server, o *SyncOptions) error {
 	if !(o.KeepExisting && o.Force) {
 		files, err := ioutil.ReadDir(modsDir)
 		if err != nil {
-			return err
+			return n, err
 		}
 
 		localMods = make(map[string]int64)
@@ -154,6 +157,7 @@ func Sync(s Server, o *SyncOptions) error {
 					ch <- err
 					return
 				}
+				n++
 			} else {
 				mu.Lock()
 				size, exists := localMods[name]
@@ -165,6 +169,7 @@ func Sync(s Server, o *SyncOptions) error {
 						ch <- err
 						return
 					}
+					n++
 				} else if size != info.Size() {
 					err := backup(name, o)
 					if err != nil {
@@ -177,6 +182,7 @@ func Sync(s Server, o *SyncOptions) error {
 						ch <- err
 						return
 					}
+					n++
 				}
 			}
 
@@ -195,7 +201,7 @@ func Sync(s Server, o *SyncOptions) error {
 		err := <-ch
 		if err != nil {
 			close(ch)
-			return err
+			return n, err
 		}
 
 		if o.OnProgress != nil {
@@ -225,7 +231,7 @@ func Sync(s Server, o *SyncOptions) error {
 			err := <-ch
 			if err != nil {
 				close(ch)
-				return err
+				return n, err
 			}
 
 			if o.OnProgress != nil {
@@ -235,7 +241,7 @@ func Sync(s Server, o *SyncOptions) error {
 		}
 	}
 
-	return nil
+	return n, nil
 }
 
 func backup(name string, o *SyncOptions) error {
