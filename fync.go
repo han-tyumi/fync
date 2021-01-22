@@ -73,7 +73,7 @@ type Server interface {
 // SyncOptions contains options for the Sync function.
 type SyncOptions struct {
 	// Called when a mod is being written.
-	OnWrite func(from *os.FileInfo, to string)
+	OnWrite func(from os.FileInfo, to string)
 
 	// Called when an existing mod is being backed up.
 	OnBackup func(name, from, to string)
@@ -122,7 +122,7 @@ func Sync(s Server, o *SyncOptions) error {
 
 	// define hooks
 	if o.OnWrite == nil {
-		o.OnWrite = func(_ *os.FileInfo, _ string) {}
+		o.OnWrite = func(_ os.FileInfo, _ string) {}
 	}
 	if o.OnBackup == nil {
 		o.OnBackup = func(_, _, _ string) {}
@@ -236,7 +236,7 @@ func write(from ServerFile, to string, o *SyncOptions) error {
 		return err
 	}
 
-	o.OnWrite(&info, to)
+	o.OnWrite(info, to)
 
 	file, err := os.Create(to)
 	if err != nil {
